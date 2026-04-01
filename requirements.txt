@@ -4,8 +4,5 @@ scikit-learn==1.5.2
 pandas
 numpy
 joblib
-<<<<<<< HEAD
 pydantic
-=======
-pydantic
->>>>>>> 0647754 (fix : update all files)
+
