@@ -1,7 +1,6 @@
 """
 TAHLIL TAÂLIM — API
 """
-
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -11,7 +10,6 @@ import pandas as pd
 import numpy as np
 import uvicorn
 import os
-
 # ─────────────────────────────────────────────────────────────
 #  Chargement du modèle
 # ─────────────────────────────────────────────────────────────
@@ -27,7 +25,6 @@ try:
     with open(COLUMNS_PATH) as f:
         COLONNES_ATTENDUES = json.load(f)
     
-    # Extraction des noms de features pour l'explicabilité
     num_cols = ['note_bac', 'moyenne_s1', 'nb_echecs_partiels', 'taux_absenteisme']
     cat_cols = ['region_origine', 'filiere_bac']
     bin_cols = ['statut_bourse', 'premier_emploi']
@@ -58,16 +55,24 @@ class PredictionResponse(BaseModel):
     prediction: int
     probability: float
     risk_level: str
-    top_features: dict  # Contiendra les %
+    top_features: dict
     advice: str
 
-# ─────────────────────────────────────────────────────────────
-#  Logique métier simplifiée
-# ─────────────────────────────────────────────────────────────
+
 def get_risk_level(prob):
     if prob > 0.7: return "Élevé"
     if prob > 0.4: return "Modéré"
     return "Faible"
+
+def clean_feature_label(name: str) -> str:
+    """
+    Transforme 'filiere_bac_SM' → 'SM'
+    Garde les autres noms intacts (num + bin features).
+    Exclut complètement les features region_origine_*.
+    """
+    if name.startswith("filiere_bac_"):
+        return name.replace("filiere_bac_", "")
+    return name
 
 # ─────────────────────────────────────────────────────────────
 #  Endpoint Principal
@@ -84,35 +89,33 @@ def predict(student: StudentInput):
     prob = float(pipeline.predict_proba(df_input)[0][1])
     pred = 1 if prob > 0.5 else 0
 
-    # 2. Calcul des Contributions en POURCENTAGE
-    # On récupère les coefficients et les données transformées
-    X_trans = pipeline.named_steps['preprocessing'].transform(df_input)
-    if hasattr(X_trans, "toarray"): X_trans = X_trans.toarray()
-    
+    # 2. Poids de la régression logistique (au lieu des contributions)
+    # On utilise directement les coefs du modèle — valeur absolue = importance
     coefs = pipeline.named_steps['model'].coef_[0]
-    raw_contributions = X_trans[0] * coefs
-    
-    # On ne garde que les contributions positives (ce qui pousse vers le décrochage)
-    # ou on prend la valeur absolue pour voir l'importance relative
-    abs_contributions = np.abs(raw_contributions)
-    total_impact = np.sum(abs_contributions)
-    
-    # Calcul du % (Contribution de chaque feature / Total des impacts)
-    feature_impacts = []
-    for name, val in zip(FEATURE_NAMES, abs_contributions):
-        percentage = (val / total_impact) * 100 if total_impact > 0 else 0
-        feature_impacts.append((name, round(percentage, 2)))
 
-    # Trier et prendre le Top 3
-    feature_impacts.sort(key=lambda x: x[1], reverse=True)
-    top_3 = {item[0]: f"{item[1]}%" for item in feature_impacts[:3]}
+    feature_weights = []
+    for name, coef in zip(FEATURE_NAMES, coefs):
+        # Exclure toutes les features région (biais éthique)
+        if name.startswith("region_origine_"):
+            continue
+        clean_name = clean_feature_label(name)
+        feature_weights.append((clean_name, abs(coef)))
 
+    # Normaliser en % sur les features conservées
+    total = sum(w for _, w in feature_weights)
+    feature_weights = [
+        (name, round((w / total) * 100, 2) if total > 0 else 0.0)
+        for name, w in feature_weights
+    ]
+
+    # Top 3
+    feature_weights.sort(key=lambda x: x[1], reverse=True)
+    top_3 = {name: f"{pct}%" for name, pct in feature_weights[:3]}
     return PredictionResponse(
         prediction=pred,
-        probability=round(prob, 4),
-        risk_level=get_risk_level(prob),
+        probability=round(prob,4),
+        risk_level=risk,
         top_features=top_3,
-        advice="Analyse basée sur les facteurs académiques et l'assiduité."
     )
 
 if __name__ == "__main__":
