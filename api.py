@@ -10,6 +10,7 @@ import pandas as pd
 import numpy as np
 import uvicorn
 import os
+
 # ─────────────────────────────────────────────────────────────
 #  Chargement du modèle
 # ─────────────────────────────────────────────────────────────
@@ -56,20 +57,17 @@ class PredictionResponse(BaseModel):
     probability: float
     risk_level: str
     top_features: dict
-    advice: str
+    # advice supprimé
 
-
+# ─────────────────────────────────────────────────────────────
+#  Logique métier
+# ─────────────────────────────────────────────────────────────
 def get_risk_level(prob):
     if prob > 0.7: return "Élevé"
     if prob > 0.4: return "Modéré"
     return "Faible"
 
 def clean_feature_label(name: str) -> str:
-    """
-    Transforme 'filiere_bac_SM' → 'SM'
-    Garde les autres noms intacts (num + bin features).
-    Exclut complètement les features region_origine_*.
-    """
     if name.startswith("filiere_bac_"):
         return name.replace("filiere_bac_", "")
     return name
@@ -82,39 +80,35 @@ def predict(student: StudentInput):
     if pipeline is None:
         raise HTTPException(status_code=500, detail="Modèle non chargé")
 
-    # Préparation données
     df_input = pd.DataFrame([student.dict()])[COLONNES_ATTENDUES]
 
-    # 1. Calcul Probabilité
+    # 1. Probabilité
     prob = float(pipeline.predict_proba(df_input)[0][1])
     pred = 1 if prob > 0.5 else 0
 
-    # 2. Poids de la régression logistique (au lieu des contributions)
-    # On utilise directement les coefs du modèle — valeur absolue = importance
+    # 2. Poids de la régression logistique
     coefs = pipeline.named_steps['model'].coef_[0]
 
     feature_weights = []
     for name, coef in zip(FEATURE_NAMES, coefs):
-        # Exclure toutes les features région (biais éthique)
         if name.startswith("region_origine_"):
             continue
         clean_name = clean_feature_label(name)
         feature_weights.append((clean_name, abs(coef)))
 
-    # Normaliser en % sur les features conservées
     total = sum(w for _, w in feature_weights)
     feature_weights = [
         (name, round((w / total) * 100, 2) if total > 0 else 0.0)
         for name, w in feature_weights
     ]
 
-    # Top 3
     feature_weights.sort(key=lambda x: x[1], reverse=True)
     top_3 = {name: f"{pct}%" for name, pct in feature_weights[:3]}
+
     return PredictionResponse(
         prediction=pred,
-        probability=round(prob,4),
-        risk_level=risk,
+        probability=round(prob, 4),
+        risk_level=get_risk_level(prob),
         top_features=top_3,
     )
 
