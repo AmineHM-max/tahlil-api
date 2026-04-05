@@ -57,7 +57,6 @@ class PredictionResponse(BaseModel):
     probability: float
     risk_level: str
     top_features: dict
-    # advice supprimé
 
 # ─────────────────────────────────────────────────────────────
 #  Logique métier
@@ -85,19 +84,18 @@ def predict(student: StudentInput):
     # 1. Probabilité
     prob = float(pipeline.predict_proba(df_input)[0][1])
     pred = 1 if prob > 0.5 else 0
+
     # 2. Poids de la régression logistique
-coefs = pipeline.named_steps['model'].coef_[0]
-feature_weights = []
-for name, coef in zip(FEATURE_NAMES, coefs):
-    if name.startswith("region_origine_"):
-        continue
-    clean_name = clean_feature_label(name)
-    feature_weights.append((clean_name, round(abs(coef), 4)))
+    coefs = pipeline.named_steps['model'].coef_[0]
+    feature_weights = []
+    for name, coef in zip(FEATURE_NAMES, coefs):
+        if name.startswith("region_origine_"):
+            continue
+        clean_name = clean_feature_label(name)
+        feature_weights.append((clean_name, round(abs(coef), 4)))
 
-feature_weights.sort(key=lambda x: x[1], reverse=True)
-top_3 = {name: coef for name, coef in feature_weights[:3]}
-
-    
+    feature_weights.sort(key=lambda x: x[1], reverse=True)
+    top_3 = {name: coef for name, coef in feature_weights[:3]}
 
     return PredictionResponse(
         prediction=pred,
