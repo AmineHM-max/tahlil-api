@@ -85,25 +85,19 @@ def predict(student: StudentInput):
     # 1. Probabilité
     prob = float(pipeline.predict_proba(df_input)[0][1])
     pred = 1 if prob > 0.5 else 0
-
     # 2. Poids de la régression logistique
-    coefs = pipeline.named_steps['model'].coef_[0]
+coefs = pipeline.named_steps['model'].coef_[0]
+feature_weights = []
+for name, coef in zip(FEATURE_NAMES, coefs):
+    if name.startswith("region_origine_"):
+        continue
+    clean_name = clean_feature_label(name)
+    feature_weights.append((clean_name, round(abs(coef), 4)))
 
-    feature_weights = []
-    for name, coef in zip(FEATURE_NAMES, coefs):
-        if name.startswith("region_origine_"):
-            continue
-        clean_name = clean_feature_label(name)
-        feature_weights.append((clean_name, abs(coef)))
+feature_weights.sort(key=lambda x: x[1], reverse=True)
+top_3 = {name: coef for name, coef in feature_weights[:3]}
 
-    total = sum(w for _, w in feature_weights)
-    feature_weights = [
-        (name, round((w / total) * 100, 2) if total > 0 else 0.0)
-        for name, w in feature_weights
-    ]
-
-    feature_weights.sort(key=lambda x: x[1], reverse=True)
-    top_3 = {name: f"{pct}%" for name, pct in feature_weights[:3]}
+    
 
     return PredictionResponse(
         prediction=pred,
